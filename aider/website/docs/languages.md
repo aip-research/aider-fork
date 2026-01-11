@@ -36,17 +36,16 @@ If you can find and share that file in a
 [GitHub issue](https://github.com/Aider-AI/aider/issues),
 then it may be possible to add repo map support.
 
-If aider doesn't support linting, it will be complicated to
-add linting and repo map support.
-That is because aider relies on 
-[py-tree-sitter-languages](https://github.com/grantjenks/py-tree-sitter-languages)
+If aider doesn't already support linting your language, 
+it will be more complicated to add support.
+Aider relies on
+[tree-sitter-language-pack](https://github.com/Goldziher/tree-sitter-language-pack)
 to provide pre-packaged versions of tree-sitter
-parsers for many languages.
-
-Aider needs to be easy for users to install in many environments,
-and it is probably too complex to add dependencies on
-additional individual tree-sitter parsers.
-
+language parsers.
+This makes it easy for users to install aider in many diverse environments.
+You probably need to work with that project to get your language
+supported, which will easily allow aider to lint that language.
+For repo-map support, you will also need to find or create a `tags.scm` file.
 
 <!--[[[cog
 from aider.repomap import get_supported_languages_md
@@ -78,10 +77,10 @@ cog.out(get_supported_languages_md())
 | capnp                | .capnp               |          |   ✓    |
 | chatito              | .chatito             |    ✓     |   ✓    |
 | clarity              | .clar                |          |   ✓    |
-| clojure              | .clj                 |          |   ✓    |
-| clojure              | .cljc                |          |   ✓    |
-| clojure              | .cljs                |          |   ✓    |
-| clojure              | .edn                 |          |   ✓    |
+| clojure              | .clj                 |    ✓     |   ✓    |
+| clojure              | .cljc                |    ✓     |   ✓    |
+| clojure              | .cljs                |    ✓     |   ✓    |
+| clojure              | .edn                 |    ✓     |   ✓    |
 | cmake                | .cmake               |          |   ✓    |
 | cmake                | CMakeLists.txt       |          |   ✓    |
 | commonlisp           | .cl                  |    ✓     |   ✓    |
@@ -111,11 +110,11 @@ cog.out(get_supported_languages_md())
 | fennel               | .fnl                 |          |   ✓    |
 | firrtl               | .fir                 |          |   ✓    |
 | fish                 | .fish                |          |   ✓    |
-| fortran              | .f                   |          |   ✓    |
-| fortran              | .f03                 |          |   ✓    |
-| fortran              | .f08                 |          |   ✓    |
-| fortran              | .f90                 |          |   ✓    |
-| fortran              | .f95                 |          |   ✓    |
+| fortran              | .f                   |    ✓     |   ✓    |
+| fortran              | .f03                 |    ✓     |   ✓    |
+| fortran              | .f08                 |    ✓     |   ✓    |
+| fortran              | .f90                 |    ✓     |   ✓    |
+| fortran              | .f95                 |    ✓     |   ✓    |
 | func                 | .fc                  |          |   ✓    |
 | gdscript             | .gd                  |          |   ✓    |
 | gitattributes        | .gitattributes       |          |   ✓    |
@@ -134,7 +133,7 @@ cog.out(get_supported_languages_md())
 | gstlaunch            | .launch              |          |   ✓    |
 | hack                 | .hack                |          |   ✓    |
 | hare                 | .ha                  |          |   ✓    |
-| haskell              | .hs                  |          |   ✓    |
+| haskell              | .hs                  |    ✓     |   ✓    |
 | haxe                 | .hx                  |          |   ✓    |
 | hcl                  | .hcl                 |    ✓     |   ✓    |
 | hcl                  | .tf                  |    ✓     |   ✓    |
@@ -154,7 +153,7 @@ cog.out(get_supported_languages_md())
 | json                 | .json                |          |   ✓    |
 | jsonnet              | .jsonnet             |          |   ✓    |
 | jsonnet              | .libsonnet           |          |   ✓    |
-| julia                | .jl                  |          |   ✓    |
+| julia                | .jl                  |    ✓     |   ✓    |
 | kconfig              | Kconfig              |          |   ✓    |
 | kdl                  | .kdl                 |          |   ✓    |
 | kotlin               | .kt                  |    ✓     |   ✓    |
@@ -173,14 +172,16 @@ cog.out(get_supported_languages_md())
 | make                 | Makefile             |          |   ✓    |
 | markdown             | .markdown            |          |   ✓    |
 | markdown             | .md                  |          |   ✓    |
-| matlab               | .m                   |          |   ✓    |
-| matlab               | .mat                 |          |   ✓    |
+| matlab               | .m                   |    ✓     |   ✓    |
+| matlab               | .mat                 |    ✓     |   ✓    |
 | mermaid              | .mermaid             |          |   ✓    |
 | meson                | meson.build          |          |   ✓    |
 | ninja                | .ninja               |          |   ✓    |
 | nix                  | .nix                 |          |   ✓    |
 | nqc                  | .nqc                 |          |   ✓    |
 | objc                 | .mm                  |          |   ✓    |
+| ocaml                | .ml                  |    ✓     |   ✓    |
+| ocaml_interface      | .mli                 |    ✓     |   ✓    |
 | odin                 | .odin                |          |   ✓    |
 | org                  | .org                 |          |   ✓    |
 | pascal               | .pas                 |          |   ✓    |
@@ -215,8 +216,8 @@ cog.out(get_supported_languages_md())
 | rst                  | .rst                 |          |   ✓    |
 | ruby                 | .rb                  |    ✓     |   ✓    |
 | rust                 | .rs                  |    ✓     |   ✓    |
-| scala                | .sc                  |          |   ✓    |
-| scala                | .scala               |          |   ✓    |
+| scala                | .sc                  |    ✓     |   ✓    |
+| scala                | .scala               |    ✓     |   ✓    |
 | scheme               | .scm                 |          |   ✓    |
 | scheme               | .ss                  |          |   ✓    |
 | scss                 | .scss                |          |   ✓    |
@@ -256,7 +257,7 @@ cog.out(get_supported_languages_md())
 | xml                  | .xml                 |          |   ✓    |
 | xml                  | .xsl                 |          |   ✓    |
 | yuck                 | .yuck                |          |   ✓    |
-| zig                  | .zig                 |          |   ✓    |
+| zig                  | .zig                 |    ✓     |   ✓    |
 
 <!--[[[end]]]-->
 

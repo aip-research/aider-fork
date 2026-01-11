@@ -20,6 +20,7 @@ EXCEPTIONS = [
         "The API provider is not able to authenticate you. Check your API key.",
     ),
     ExInfo("AzureOpenAIError", True, None),
+    ExInfo("BadGatewayError", True, "The API provider's servers are down or overloaded."),
     ExInfo("BadRequestError", False, None),
     ExInfo("BudgetExceededError", True, None),
     ExInfo(
@@ -28,6 +29,7 @@ EXCEPTIONS = [
         "The API provider has refused the request due to a safety policy about the content.",
     ),
     ExInfo("ContextWindowExceededError", False, None),  # special case handled in base_coder
+    ExInfo("ImageFetchError", False, "The API provider was unable to fetch one or more images."),
     ExInfo("InternalServerError", True, "The API provider's servers are down or overloaded."),
     ExInfo("InvalidRequestError", True, None),
     ExInfo("JSONSchemaValidationError", True, None),
@@ -61,7 +63,10 @@ class LiteLLMExceptions:
         import litellm
 
         for var in dir(litellm):
-            if var.endswith("Error"):
+            # Filter by BaseException because instances of non-exception classes cannot be caught.
+            # `litellm.ErrorEventError` is an example of a regular class which just happens to end
+            # with `Error`.
+            if var.endswith("Error") and issubclass(getattr(litellm, var), BaseException):
                 if var not in self.exception_info:
                     raise ValueError(f"{var} is in litellm but not in aider's exceptions list")
 
@@ -83,4 +88,25 @@ class LiteLLMExceptions:
                 )
             if "boto3" in str(ex):
                 return ExInfo("APIConnectionError", False, "You need to: pip install boto3")
+            if "OpenrouterException" in str(ex) and "'choices'" in str(ex):
+                return ExInfo(
+                    "APIConnectionError",
+                    True,
+                    (
+                        "OpenRouter or the upstream API provider is down, overloaded or rate"
+                        " limiting your requests."
+                    ),
+                )
+
+        # Check for specific non-retryable APIError cases like insufficient credits
+        if ex.__class__ is litellm.APIError:
+            err_str = str(ex).lower()
+            if "insufficient credits" in err_str and '"code":402' in err_str:
+                return ExInfo(
+                    "APIError",
+                    False,
+                    "Insufficient credits with the API provider. Please add credits.",
+                )
+            # Fall through to default APIError handling if not the specific credits error
+
         return self.exceptions.get(ex.__class__, ExInfo(None, None, None))

@@ -1124,6 +1124,29 @@ class TestCommands(TestCase):
             # Check that the output was added to cur_messages
             self.assertTrue(any("exit 1" in msg["content"] for msg in coder.cur_messages))
 
+    def test_cmd_test_returns_output_on_failure(self):
+        with ChdirTemporaryDirectory():
+            io = InputOutput(pretty=False, fancy_input=False, yes=False)
+            from aider.coders import Coder
+
+            coder = Coder.create(self.GPT35, None, io)
+            commands = Commands(io, coder)
+
+            # Define a command that prints to stderr and exits with non-zero status
+            test_cmd = "echo 'error output' >&2 && exit 1"
+            expected_output_fragment = "error output"
+
+            # Run cmd_test
+            result = commands.cmd_test(test_cmd)
+
+            # Assert that the result contains the expected output
+            self.assertIsNotNone(result)
+            self.assertIn(expected_output_fragment, result)
+            # Check that the output was also added to cur_messages
+            self.assertTrue(
+                any(expected_output_fragment in msg["content"] for msg in coder.cur_messages)
+            )
+
     def test_cmd_add_drop_untracked_files(self):
         with GitTemporaryDirectory():
             repo = git.Repo()
@@ -1598,6 +1621,33 @@ class TestCommands(TestCase):
                 # Clean up: remove the test file from the home directory
                 test_file.unlink()
 
+    # pytest tests/basic/test_commands.py  -k test_cmd_read_only_with_square_brackets
+    def test_cmd_read_only_with_square_brackets(self):
+        with GitTemporaryDirectory() as repo_dir:
+            io = InputOutput(pretty=False, fancy_input=False, yes=False)
+            coder = Coder.create(self.GPT35, None, io)
+            commands = Commands(io, coder)
+
+            # Create test layout
+            test_dir = Path(repo_dir) / "[id]"
+            test_dir.mkdir()
+            test_file = Path(repo_dir) / "[id]" / "page.tsx"
+            test_file.write_text("Test file")
+
+            # Test the /read-only command
+            commands.cmd_read_only("[id]/page.tsx")
+
+            # Check if test file was added to abs_read_only_fnames
+            self.assertTrue(
+                any(os.path.samefile(str(test_file), fname) for fname in coder.abs_read_only_fnames)
+            )
+
+            # Test dropping all read-only files
+            commands.cmd_drop("[id]/page.tsx")
+
+            # Check if all files were removed from abs_read_only_fnames
+            self.assertEqual(len(coder.abs_read_only_fnames), 0)
+
     def test_cmd_diff(self):
         with GitTemporaryDirectory() as repo_dir:
             repo = git.Repo(repo_dir)
@@ -1663,6 +1713,98 @@ class TestCommands(TestCase):
                 diff_output = mock_print.call_args[0][0]
                 self.assertIn("-Further modified content", diff_output)
                 self.assertIn("+Final modified content", diff_output)
+
+    def test_cmd_model(self):
+        io = InputOutput(pretty=False, fancy_input=False, yes=True)
+        coder = Coder.create(self.GPT35, None, io)
+        commands = Commands(io, coder)
+
+        # Test switching the main model
+        with self.assertRaises(SwitchCoder) as context:
+            commands.cmd_model("gpt-4")
+
+        # Check that the SwitchCoder exception contains the correct model configuration
+        self.assertEqual(context.exception.kwargs.get("main_model").name, "gpt-4")
+        self.assertEqual(
+            context.exception.kwargs.get("main_model").editor_model.name,
+            self.GPT35.editor_model.name,
+        )
+        self.assertEqual(
+            context.exception.kwargs.get("main_model").weak_model.name, self.GPT35.weak_model.name
+        )
+        # Check that the edit format is updated to the new model's default
+        self.assertEqual(context.exception.kwargs.get("edit_format"), "diff")
+
+    def test_cmd_model_preserves_explicit_edit_format(self):
+        io = InputOutput(pretty=False, fancy_input=False, yes=True)
+        # Use gpt-3.5-turbo (default 'diff')
+        coder = Coder.create(self.GPT35, None, io)
+        # Explicitly set edit format to something else
+        coder.edit_format = "udiff"
+        commands = Commands(io, coder)
+
+        # Mock sanity check to avoid network calls
+        with mock.patch("aider.models.sanity_check_models"):
+            # Test switching the main model to gpt-4 (default 'whole')
+            with self.assertRaises(SwitchCoder) as context:
+                commands.cmd_model("gpt-4")
+
+        # Check that the SwitchCoder exception contains the correct model configuration
+        self.assertEqual(context.exception.kwargs.get("main_model").name, "gpt-4")
+        # Check that the edit format is preserved
+        self.assertEqual(context.exception.kwargs.get("edit_format"), "udiff")
+
+    def test_cmd_editor_model(self):
+        io = InputOutput(pretty=False, fancy_input=False, yes=True)
+        coder = Coder.create(self.GPT35, None, io)
+        commands = Commands(io, coder)
+
+        # Test switching the editor model
+        with self.assertRaises(SwitchCoder) as context:
+            commands.cmd_editor_model("gpt-4")
+
+        # Check that the SwitchCoder exception contains the correct model configuration
+        self.assertEqual(context.exception.kwargs.get("main_model").name, self.GPT35.name)
+        self.assertEqual(context.exception.kwargs.get("main_model").editor_model.name, "gpt-4")
+        self.assertEqual(
+            context.exception.kwargs.get("main_model").weak_model.name, self.GPT35.weak_model.name
+        )
+
+    def test_cmd_weak_model(self):
+        io = InputOutput(pretty=False, fancy_input=False, yes=True)
+        coder = Coder.create(self.GPT35, None, io)
+        commands = Commands(io, coder)
+
+        # Test switching the weak model
+        with self.assertRaises(SwitchCoder) as context:
+            commands.cmd_weak_model("gpt-4")
+
+        # Check that the SwitchCoder exception contains the correct model configuration
+        self.assertEqual(context.exception.kwargs.get("main_model").name, self.GPT35.name)
+        self.assertEqual(
+            context.exception.kwargs.get("main_model").editor_model.name,
+            self.GPT35.editor_model.name,
+        )
+        self.assertEqual(context.exception.kwargs.get("main_model").weak_model.name, "gpt-4")
+
+    def test_cmd_model_updates_default_edit_format(self):
+        io = InputOutput(pretty=False, fancy_input=False, yes=True)
+        # Use gpt-3.5-turbo (default 'diff')
+        coder = Coder.create(self.GPT35, None, io)
+        # Ensure current edit format is the default
+        self.assertEqual(coder.edit_format, self.GPT35.edit_format)
+        commands = Commands(io, coder)
+
+        # Mock sanity check to avoid network calls
+        with mock.patch("aider.models.sanity_check_models"):
+            # Test switching the main model to gpt-4 (default 'whole')
+            with self.assertRaises(SwitchCoder) as context:
+                commands.cmd_model("gpt-4")
+
+        # Check that the SwitchCoder exception contains the correct model configuration
+        self.assertEqual(context.exception.kwargs.get("main_model").name, "gpt-4")
+        # Check that the edit format is updated to the new model's default
+        self.assertEqual(context.exception.kwargs.get("edit_format"), "diff")
 
     def test_cmd_ask(self):
         io = InputOutput(pretty=False, fancy_input=False, yes=True)
@@ -1990,3 +2132,95 @@ class TestCommands(TestCase):
                     mock_tool_error.assert_any_call(
                         "Command '/model gpt-4' is only supported in interactive mode, skipping."
                     )
+
+    def test_reset_after_coder_clone_preserves_original_read_only_files(self):
+        with GitTemporaryDirectory() as _:
+            repo_dir = str(".")
+            io = InputOutput(pretty=False, fancy_input=False, yes=True)
+
+            orig_ro_path = Path(repo_dir) / "orig_ro.txt"
+            orig_ro_path.write_text("original read only")
+
+            editable_path = Path(repo_dir) / "editable.txt"
+            editable_path.write_text("editable content")
+
+            other_ro_path = Path(repo_dir) / "other_ro.txt"
+            other_ro_path.write_text("other read only")
+
+            original_read_only_fnames_set = {str(orig_ro_path)}
+
+            # Create the initial Coder
+            orig_coder = Coder.create(main_model=self.GPT35, io=io, fnames=[], repo=None)
+            orig_coder.root = repo_dir  # Set root for path operations
+
+            # Replace its commands object with one that has the original_read_only_fnames
+            orig_coder.commands = Commands(
+                io, orig_coder, original_read_only_fnames=list(original_read_only_fnames_set)
+            )
+            orig_coder.commands.coder = orig_coder
+
+            # Populate coder's file sets
+            orig_coder.abs_read_only_fnames.add(str(orig_ro_path))
+            orig_coder.abs_fnames.add(str(editable_path))
+            orig_coder.abs_read_only_fnames.add(str(other_ro_path))
+
+            # Simulate SwitchCoder by creating a new coder from the original one
+            new_coder = Coder.create(from_coder=orig_coder)
+            new_commands = new_coder.commands
+
+            # Perform /reset
+            new_commands.cmd_reset("")
+
+            # Assertions for /reset
+            self.assertEqual(len(new_coder.abs_fnames), 0)
+            self.assertEqual(len(new_coder.abs_read_only_fnames), 1)
+            # self.assertIn(str(orig_ro_path), new_coder.abs_read_only_fnames)
+            self.assertTrue(
+                any(os.path.samefile(p, str(orig_ro_path)) for p in new_coder.abs_read_only_fnames),
+                f"File {str(orig_ro_path)} not found in {new_coder.abs_read_only_fnames}",
+            )
+            self.assertEqual(len(new_coder.done_messages), 0)
+            self.assertEqual(len(new_coder.cur_messages), 0)
+
+    def test_drop_bare_after_coder_clone_preserves_original_read_only_files(self):
+        with GitTemporaryDirectory() as _:
+            repo_dir = str(".")
+            io = InputOutput(pretty=False, fancy_input=False, yes=True)
+
+            orig_ro_path = Path(repo_dir) / "orig_ro.txt"
+            orig_ro_path.write_text("original read only")
+
+            editable_path = Path(repo_dir) / "editable.txt"
+            editable_path.write_text("editable content")
+
+            other_ro_path = Path(repo_dir) / "other_ro.txt"
+            other_ro_path.write_text("other read only")
+
+            original_read_only_fnames_set = {str(orig_ro_path)}
+
+            orig_coder = Coder.create(main_model=self.GPT35, io=io, fnames=[], repo=None)
+            orig_coder.root = repo_dir
+            orig_coder.commands = Commands(
+                io, orig_coder, original_read_only_fnames=list(original_read_only_fnames_set)
+            )
+            orig_coder.commands.coder = orig_coder
+
+            orig_coder.abs_read_only_fnames.add(str(orig_ro_path))
+            orig_coder.abs_fnames.add(str(editable_path))
+            orig_coder.abs_read_only_fnames.add(str(other_ro_path))
+            orig_coder.done_messages = [{"role": "user", "content": "d1"}]
+            orig_coder.cur_messages = [{"role": "user", "content": "c1"}]
+
+            new_coder = Coder.create(from_coder=orig_coder)
+            new_commands = new_coder.commands
+            new_commands.cmd_drop("")
+
+            self.assertEqual(len(new_coder.abs_fnames), 0)
+            self.assertEqual(len(new_coder.abs_read_only_fnames), 1)
+            # self.assertIn(str(orig_ro_path), new_coder.abs_read_only_fnames)
+            self.assertTrue(
+                any(os.path.samefile(p, str(orig_ro_path)) for p in new_coder.abs_read_only_fnames),
+                f"File {str(orig_ro_path)} not found in {new_coder.abs_read_only_fnames}",
+            )
+            self.assertEqual(new_coder.done_messages, [{"role": "user", "content": "d1"}])
+            self.assertEqual(new_coder.cur_messages, [{"role": "user", "content": "c1"}])

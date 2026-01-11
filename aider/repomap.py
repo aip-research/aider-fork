@@ -19,7 +19,7 @@ from tqdm import tqdm
 
 from aider.dump import dump
 from aider.special import filter_important_files
-from aider.utils import Spinner
+from aider.waiting import Spinner
 
 # tree_sitter is throwing a FutureWarning
 warnings.simplefilter("ignore", category=FutureWarning)
@@ -34,6 +34,8 @@ SQLITE_ERRORS = (sqlite3.OperationalError, sqlite3.DatabaseError, OSError)
 CACHE_VERSION = 3
 if USING_TSL_PACK:
     CACHE_VERSION = 4
+
+UPDATING_REPO_MAP_MESSAGE = "Updating repo map"
 
 
 class RepoMap:
@@ -380,7 +382,7 @@ class RepoMap:
             if self.verbose:
                 self.io.tool_output(f"Processing {fname}")
             if progress and not showing_bar:
-                progress()
+                progress(f"{UPDATING_REPO_MAP_MESSAGE}: {fname}")
 
             try:
                 file_ok = Path(fname).is_file()
@@ -398,13 +400,30 @@ class RepoMap:
 
             # dump(fname)
             rel_fname = self.get_rel_fname(fname)
+            current_pers = 0.0  # Start with 0 personalization score
 
             if fname in chat_fnames:
-                personalization[rel_fname] = personalize
+                current_pers += personalize
                 chat_rel_fnames.add(rel_fname)
 
             if rel_fname in mentioned_fnames:
-                personalization[rel_fname] = personalize
+                # Use max to avoid double counting if in chat_fnames and mentioned_fnames
+                current_pers = max(current_pers, personalize)
+
+            # Check path components against mentioned_idents
+            path_obj = Path(rel_fname)
+            path_components = set(path_obj.parts)
+            basename_with_ext = path_obj.name
+            basename_without_ext, _ = os.path.splitext(basename_with_ext)
+            components_to_check = path_components.union({basename_with_ext, basename_without_ext})
+
+            matched_idents = components_to_check.intersection(mentioned_idents)
+            if matched_idents:
+                # Add personalization *once* if any path component matches a mentioned ident
+                current_pers += personalize
+
+            if current_pers > 0:
+                personalization[rel_fname] = current_pers  # Assign the final calculated value
 
             tags = list(self.get_tags(fname, rel_fname))
             if tags is None:
@@ -442,15 +461,23 @@ class RepoMap:
 
         for ident in idents:
             if progress:
-                progress()
+                progress(f"{UPDATING_REPO_MAP_MESSAGE}: {ident}")
 
             definers = defines[ident]
+
+            mul = 1.0
+
+            is_snake = ("_" in ident) and any(c.isalpha() for c in ident)
+            is_kebab = ("-" in ident) and any(c.isalpha() for c in ident)
+            is_camel = any(c.isupper() for c in ident) and any(c.islower() for c in ident)
             if ident in mentioned_idents:
-                mul = 10
-            elif ident.startswith("_"):
-                mul = 0.1
-            else:
-                mul = 1
+                mul *= 10
+            if (is_snake or is_kebab or is_camel) and len(ident) >= 8:
+                mul *= 10
+            if ident.startswith("_"):
+                mul *= 0.1
+            if len(defines[ident]) > 5:
+                mul *= 0.1
 
             for referencer, num_refs in Counter(references[ident]).items():
                 for definer in definers:
@@ -458,10 +485,14 @@ class RepoMap:
                     # if referencer == definer:
                     #    continue
 
+                    use_mul = mul
+                    if referencer in chat_rel_fnames:
+                        use_mul *= 50
+
                     # scale down so high freq (low value) mentions don't dominate
                     num_refs = math.sqrt(num_refs)
 
-                    G.add_edge(referencer, definer, weight=mul * num_refs, ident=ident)
+                    G.add_edge(referencer, definer, weight=use_mul * num_refs, ident=ident)
 
         if not references:
             pass
@@ -484,7 +515,7 @@ class RepoMap:
         ranked_definitions = defaultdict(float)
         for src in G.nodes:
             if progress:
-                progress()
+                progress(f"{UPDATING_REPO_MAP_MESSAGE}: {src}")
 
             src_rank = ranked[src]
             total_weight = sum(data["weight"] for _src, _dst, data in G.out_edges(src, data=True))
@@ -593,7 +624,7 @@ class RepoMap:
         if not mentioned_idents:
             mentioned_idents = set()
 
-        spin = Spinner("Updating repo map")
+        spin = Spinner(UPDATING_REPO_MAP_MESSAGE)
 
         ranked_tags = self.get_ranked_tags(
             chat_fnames,
@@ -627,7 +658,11 @@ class RepoMap:
         while lower_bound <= upper_bound:
             # dump(lower_bound, middle, upper_bound)
 
-            spin.step()
+            if middle > 1500:
+                show_tokens = f"{middle / 1000.0:.1f}K"
+            else:
+                show_tokens = str(middle)
+            spin.step(f"{UPDATING_REPO_MAP_MESSAGE}: {show_tokens} tokens")
 
             tree = self.to_tree(ranked_tags[:middle], chat_rel_fnames)
             num_tokens = self.token_count(tree)

@@ -17,6 +17,7 @@ from aider import models, prompts, voice
 from aider.editor import pipe_editor
 from aider.format_settings import format_settings
 from aider.help import Help, install_help_extra
+from aider.io import CommandCompletionException
 from aider.llm import litellm
 from aider.repo import ANY_GIT_ERROR
 from aider.run_cmd import run_cmd
@@ -27,8 +28,9 @@ from .dump import dump  # noqa: F401
 
 
 class SwitchCoder(Exception):
-    def __init__(self, **kwargs):
+    def __init__(self, placeholder=None, **kwargs):
         self.kwargs = kwargs
+        self.placeholder = placeholder
 
 
 class Commands:
@@ -45,6 +47,7 @@ class Commands:
             parser=self.parser,
             verbose=self.verbose,
             editor=self.editor,
+            original_read_only_fnames=self.original_read_only_fnames,
         )
 
     def __init__(
@@ -82,10 +85,53 @@ class Commands:
         self.original_read_only_fnames = set(original_read_only_fnames or [])
 
     def cmd_model(self, args):
-        "Switch to a new LLM"
+        "Switch the Main Model to a new LLM"
 
         model_name = args.strip()
-        model = models.Model(model_name, weak_model=self.coder.main_model.weak_model.name)
+        if not model_name:
+            announcements = "\n".join(self.coder.get_announcements())
+            self.io.tool_output(announcements)
+            return
+
+        model = models.Model(
+            model_name,
+            editor_model=self.coder.main_model.editor_model.name,
+            weak_model=self.coder.main_model.weak_model.name,
+        )
+        models.sanity_check_models(self.io, model)
+
+        # Check if the current edit format is the default for the old model
+        old_model_edit_format = self.coder.main_model.edit_format
+        current_edit_format = self.coder.edit_format
+
+        new_edit_format = current_edit_format
+        if current_edit_format == old_model_edit_format:
+            # If the user was using the old model's default, switch to the new model's default
+            new_edit_format = model.edit_format
+
+        raise SwitchCoder(main_model=model, edit_format=new_edit_format)
+
+    def cmd_editor_model(self, args):
+        "Switch the Editor Model to a new LLM"
+
+        model_name = args.strip()
+        model = models.Model(
+            self.coder.main_model.name,
+            editor_model=model_name,
+            weak_model=self.coder.main_model.weak_model.name,
+        )
+        models.sanity_check_models(self.io, model)
+        raise SwitchCoder(main_model=model)
+
+    def cmd_weak_model(self, args):
+        "Switch the Weak Model to a new LLM"
+
+        model_name = args.strip()
+        model = models.Model(
+            self.coder.main_model.name,
+            editor_model=self.coder.main_model.editor_model.name,
+            weak_model=model_name,
+        )
         models.sanity_check_models(self.io, model)
         raise SwitchCoder(main_model=model)
 
@@ -117,6 +163,10 @@ class Commands:
                         "Work with an architect model to design code changes, and an editor to make"
                         " them."
                     ),
+                ),
+                (
+                    "context",
+                    "Automatically identify which files will need to be edited.",
                 ),
             ]
         )
@@ -176,12 +226,18 @@ class Commands:
 
         self.io.tool_output(f"Scraping {url}...")
         if not self.scraper:
-            res = install_playwright(self.io)
-            if not res:
-                self.io.tool_warning("Unable to initialize playwright.")
+            disable_playwright = getattr(self.args, "disable_playwright", False)
+            if disable_playwright:
+                res = False
+            else:
+                res = install_playwright(self.io)
+                if not res:
+                    self.io.tool_warning("Unable to initialize playwright.")
 
             self.scraper = Scraper(
-                print_error=self.io.tool_error, playwright_available=res, verify_ssl=self.verify_ssl
+                print_error=self.io.tool_error,
+                playwright_available=res,
+                verify_ssl=self.verify_ssl,
             )
 
         content = self.scraper.scrape(url) or ""
@@ -295,7 +351,7 @@ class Commands:
             return
 
         commit_message = args.strip() if args else None
-        self.coder.repo.commit(message=commit_message)
+        self.coder.repo.commit(message=commit_message, coder=self.coder)
 
     def cmd_lint(self, args="", fnames=None):
         "Lint and fix in-chat files or all dirty files if none in chat"
@@ -356,6 +412,7 @@ class Commands:
         "Clear the chat history"
 
         self._clear_chat_history()
+        self.io.tool_output("All chat history cleared.")
 
     def _drop_all_files(self):
         self.coder.abs_fnames = set()
@@ -512,6 +569,7 @@ class Commands:
 
         last_commit_hash = self.coder.repo.get_head_commit_sha(short=True)
         last_commit_message = self.coder.repo.get_head_commit_message("(unknown)").strip()
+        last_commit_message = (last_commit_message.splitlines() or [""])[0]
         if last_commit_hash not in self.coder.aider_commit_hashes:
             self.io.tool_error("The last commit was not made by aider in this chat session.")
             self.io.tool_output(
@@ -590,6 +648,7 @@ class Commands:
         # Get the current HEAD after undo
         current_head_hash = self.coder.repo.get_head_commit_sha(short=True)
         current_head_message = self.coder.repo.get_head_commit_message("(unknown)").strip()
+        current_head_message = (current_head_message.splitlines() or [""])[0]
         self.io.tool_output(f"Now at:  {current_head_hash} {current_head_message}")
 
         if self.coder.main_model.send_undo_reply:
@@ -793,7 +852,11 @@ class Commands:
                 )
                 continue
 
-            if self.coder.repo and self.coder.repo.git_ignored_file(matched_file):
+            if (
+                self.coder.repo
+                and self.coder.repo.git_ignored_file(matched_file)
+                and not self.coder.add_gitignore_files
+            ):
                 self.io.tool_error(f"Can't add {matched_file} which is in gitignore")
                 continue
 
@@ -970,8 +1033,14 @@ class Commands:
                 dict(role="assistant", content="Ok."),
             ]
 
-            if add and exit_status != 0:
+            if add_on_nonzero_exit and exit_status != 0:
+                # Return the formatted output message for test failures
+                return msg
+            elif add and exit_status != 0:
                 self.io.placeholder = "What's wrong? Fix"
+
+        # Return None if output wasn't added or command succeeded
+        return None
 
     def cmd_exit(self, args):
         "Exit the application"
@@ -1088,6 +1157,18 @@ class Commands:
             show_announcements=False,
         )
 
+    def completions_ask(self):
+        raise CommandCompletionException()
+
+    def completions_code(self):
+        raise CommandCompletionException()
+
+    def completions_architect(self):
+        raise CommandCompletionException()
+
+    def completions_context(self):
+        raise CommandCompletionException()
+
     def cmd_ask(self, args):
         """Ask questions about the code base without editing any files. If no prompt provided, switches to ask mode."""  # noqa
         return self._generic_chat_command(args, "ask")
@@ -1100,7 +1181,11 @@ class Commands:
         """Enter architect/editor mode using 2 different models. If no prompt provided, switches to architect/editor mode."""  # noqa
         return self._generic_chat_command(args, "architect")
 
-    def _generic_chat_command(self, args, edit_format):
+    def cmd_context(self, args):
+        """Enter context mode to see surrounding code context. If no prompt provided, switches to context mode."""  # noqa
+        return self._generic_chat_command(args, "context", placeholder=args.strip() or None)
+
+    def _generic_chat_command(self, args, edit_format, placeholder=None):
         if not args.strip():
             # Switch to the corresponding chat mode if no args provided
             return self.cmd_chat_mode(edit_format)
@@ -1117,11 +1202,13 @@ class Commands:
         user_msg = args
         coder.run(user_msg)
 
+        # Use the provided placeholder if any
         raise SwitchCoder(
             edit_format=self.coder.edit_format,
             summarize_from_coder=False,
             from_coder=coder,
             show_announcements=False,
+            placeholder=placeholder,
         )
 
     def get_help_md(self):
@@ -1237,12 +1324,23 @@ class Commands:
         # First collect all expanded paths
         for pattern in filenames:
             expanded_pattern = expanduser(pattern)
-            if os.path.isabs(expanded_pattern):
-                # For absolute paths, glob it
-                matches = list(glob.glob(expanded_pattern))
+            path_obj = Path(expanded_pattern)
+            is_abs = path_obj.is_absolute()
+            if not is_abs:
+                path_obj = Path(self.coder.root) / path_obj
+
+            matches = []
+            # Check for literal path existence first
+            if path_obj.exists():
+                matches = [path_obj]
             else:
-                # For relative paths and globs, use glob from the root directory
-                matches = list(Path(self.coder.root).glob(expanded_pattern))
+                # If literal path doesn't exist, try globbing
+                if is_abs:
+                    # For absolute paths, glob it
+                    matches = [Path(p) for p in glob.glob(expanded_pattern)]
+                else:
+                    # For relative paths and globs, use glob from the root directory
+                    matches = list(Path(self.coder.root).glob(expanded_pattern))
 
             if not matches:
                 self.io.tool_error(f"No matches found for: {pattern}")
@@ -1317,7 +1415,30 @@ class Commands:
         "Print out the current settings"
         settings = format_settings(self.parser, self.args)
         announcements = "\n".join(self.coder.get_announcements())
+
+        # Build metadata for the active models (main, editor, weak)
+        model_sections = []
+        active_models = [
+            ("Main model", self.coder.main_model),
+            ("Editor model", getattr(self.coder.main_model, "editor_model", None)),
+            ("Weak model", getattr(self.coder.main_model, "weak_model", None)),
+        ]
+        for label, model in active_models:
+            if not model:
+                continue
+            info = getattr(model, "info", {}) or {}
+            if not info:
+                continue
+            model_sections.append(f"{label} ({model.name}):")
+            for k, v in sorted(info.items()):
+                model_sections.append(f"  {k}: {v}")
+            model_sections.append("")  # blank line between models
+
+        model_metadata = "\n".join(model_sections)
+
         output = f"{announcements}\n{settings}"
+        if model_metadata:
+            output += "\n" + model_metadata
         self.io.tool_output(output)
 
     def completions_raw_load(self, document, complete_event):
@@ -1434,17 +1555,21 @@ class Commands:
         if user_input.strip():
             self.io.set_placeholder(user_input.rstrip())
 
+    def cmd_edit(self, args=""):
+        "Alias for /editor: Open an editor to write a prompt"
+        return self.cmd_editor(args)
+
     def cmd_think_tokens(self, args):
-        "Set the thinking token budget (supports formats like 8096, 8k, 10.5k, 0.5M)"
+        """Set the thinking token budget, eg: 8096, 8k, 10.5k, 0.5M, or 0 to disable."""
         model = self.coder.main_model
 
         if not args.strip():
             # Display current value if no args are provided
-            formatted_budget = model.get_thinking_tokens(model)
+            formatted_budget = model.get_thinking_tokens()
             if formatted_budget is None:
                 self.io.tool_output("Thinking tokens are not currently set.")
             else:
-                budget = model.extra_params["thinking"].get("budget_tokens")
+                budget = model.get_raw_thinking_tokens()
                 self.io.tool_output(
                     f"Current thinking token budget: {budget:,} tokens ({formatted_budget})."
                 )
@@ -1453,10 +1578,16 @@ class Commands:
         value = args.strip()
         model.set_thinking_tokens(value)
 
-        formatted_budget = model.get_thinking_tokens(model)
-        budget = model.extra_params["thinking"].get("budget_tokens")
+        # Handle the special case of 0 to disable thinking tokens
+        if value == "0":
+            self.io.tool_output("Thinking tokens disabled.")
+        else:
+            formatted_budget = model.get_thinking_tokens()
+            budget = model.get_raw_thinking_tokens()
+            self.io.tool_output(
+                f"Set thinking token budget to {budget:,} tokens ({formatted_budget})."
+            )
 
-        self.io.tool_output(f"Set thinking token budget to {budget:,} tokens ({formatted_budget}).")
         self.io.tool_output()
 
         # Output announcements
@@ -1469,7 +1600,7 @@ class Commands:
 
         if not args.strip():
             # Display current value if no args are provided
-            reasoning_value = model.get_reasoning_effort(model)
+            reasoning_value = model.get_reasoning_effort()
             if reasoning_value is None:
                 self.io.tool_output("Reasoning effort is not currently set.")
             else:
@@ -1478,7 +1609,7 @@ class Commands:
 
         value = args.strip()
         model.set_reasoning_effort(value)
-        reasoning_value = model.get_reasoning_effort(model)
+        reasoning_value = model.get_reasoning_effort()
         self.io.tool_output(f"Set reasoning effort to {reasoning_value}")
         self.io.tool_output()
 

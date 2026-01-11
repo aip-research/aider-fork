@@ -153,6 +153,21 @@ Add 6.9k tokens of command output to the chat? (Y)es/(N)o [Yes]: Yes
 /ask Are there any problems with the way this change works with the FooBar class?
 ```
 
+And of course you can prepare diff output outside of aider and provide it as
+a file for aider to read:
+
+```
+$ git diff -C10 v1..v2 > v1-v2-changes.diff
+$ aider --read v1-v2-changes.diff
+
+Aider v0.77.2.dev+import
+Main model: anthropic/claude-3-7-sonnet-20250219 with diff edit format, 8k think tokens
+──────────────────────────────────
+v1-v2-changes.diff
+> Do you see any potential bugs in this PR?
+```
+
+
 {: .tip }
 The `/git` command will not work for this purpose, as its output is not included in the chat. 
 
@@ -249,15 +264,15 @@ tr:hover { background-color: #f5f5f5; }
 </style>
 <table>
 <tr><th>Model Name</th><th class='right'>Total Tokens</th><th class='right'>Percent</th></tr>
-<tr><td>anthropic/claude-3-7-sonnet-20250219</td><td class='right'>1,755,049</td><td class='right'>96.4%</td></tr>
-<tr><td>openrouter/anthropic/claude-3.7-sonnet</td><td class='right'>45,196</td><td class='right'>2.5%</td></tr>
-<tr><td>fireworks_ai/accounts/fireworks/models/deepseek-r1</td><td class='right'>17,585</td><td class='right'>1.0%</td></tr>
-<tr><td>cohere_chat/REDACTED</td><td class='right'>1,893</td><td class='right'>0.1%</td></tr>
+<tr><td>gemini/gemini-2.5-pro</td><td class='right'>222,047</td><td class='right'>23.7%</td></tr>
+<tr><td>gpt-5</td><td class='right'>211,072</td><td class='right'>22.6%</td></tr>
+<tr><td>gemini/gemini-3-flash-preview</td><td class='right'>187,836</td><td class='right'>20.1%</td></tr>
+<tr><td>None</td><td class='right'>168,988</td><td class='right'>18.1%</td></tr>
+<tr><td>gemini/gemini-3-pro-preview</td><td class='right'>81,851</td><td class='right'>8.8%</td></tr>
+<tr><td>o3-pro</td><td class='right'>36,620</td><td class='right'>3.9%</td></tr>
+<tr><td>gemini/gemini-2.5-flash-lite</td><td class='right'>15,470</td><td class='right'>1.7%</td></tr>
+<tr><td>gemini/gemini-2.5-flash-lite-preview-06-17</td><td class='right'>11,371</td><td class='right'>1.2%</td></tr>
 </table>
-
-{: .note :}
-Some models show as REDACTED, because they are new or unpopular models.
-Aider's analytics only records the names of "well known" LLMs.
 <!--[[[end]]]-->
 
 ## How are the "aider wrote xx% of code" stats computed?
@@ -269,6 +284,16 @@ The
 by doing something like `git blame` on the repo,
 and counting up who wrote all the new lines of code in each release.
 Only lines in source code files are counted, not documentation or prompt files.
+
+## Why did aider ignore/discard its proposed edits after it asked to add a new file to the chat?
+
+If aider prompts you to add a new file to the chat and you say yes,
+it will re-submit the original request. 
+The fact that the LLM's reply indicated that it needed to see another file (and you said yes)
+is often a sign that the LLM should have been able to see/edit that file in the first place. 
+Without access to it, there is increased chance that it's done a bad implementation of the requested change.
+Often LLMs will hallucinate content for the files they needed but didn't have.
+So aider re-submits the original request in this situation.
 
 ## Why does aider sometimes stop highlighting code in its replies?
 
@@ -345,6 +370,10 @@ Aider is
 [open source and available on GitHub](https://github.com/Aider-AI/aider)
 under an 
 [Apache 2.0 license](https://github.com/Aider-AI/aider/blob/main/LICENSE.txt).
+
+## Can I Script Aider?
+
+Yes. You can script aider via the command line or python. See more from here: [Scripting aider](https://aider.chat/docs/scripting.html)
 
 
 <div style="height:80vh"></div>

@@ -112,7 +112,7 @@ cog.outl("```")
 ## Set the reasoning_effort API parameter (default: not set)
 #AIDER_REASONING_EFFORT=
 
-## Set the thinking token budget for models that support it (default: not set)
+## Set the thinking token budget for models that support it. Use 0 to disable. (default: not set)
 #AIDER_THINKING_TOKENS=
 
 ## Verify the SSL cert when connecting to models (default: True)
@@ -141,6 +141,9 @@ cog.outl("```")
 
 ## Only work with models that have meta-data available (default: True)
 #AIDER_SHOW_MODEL_WARNINGS=true
+
+## Check if model accepts settings like reasoning_effort/thinking_tokens (default: True)
+#AIDER_CHECK_MODEL_ACCEPTS_SETTINGS=true
 
 ## Soft limit on tokens for chat history, after which summarization begins. If unspecified, defaults to the model's max_chat_history_tokens.
 #AIDER_MAX_CHAT_HISTORY_TOKENS=
@@ -238,6 +241,9 @@ cog.outl("```")
 ## Enable/disable adding .aider* to .gitignore (default: True)
 #AIDER_GITIGNORE=true
 
+## Enable/disable the addition of files listed in .gitignore to Aider's editing scope.
+#AIDER_ADD_GITIGNORE_FILES=false
+
 ## Specify the aider ignore file (default: .aiderignore in git root)
 #AIDER_AIDERIGNORE=.aiderignore
 
@@ -250,17 +256,23 @@ cog.outl("```")
 ## Enable/disable commits when repo is found dirty (default: True)
 #AIDER_DIRTY_COMMITS=true
 
-## Attribute aider code changes in the git author name (default: True)
-#AIDER_ATTRIBUTE_AUTHOR=true
+## Attribute aider code changes in the git author name (default: True). If explicitly set to True, overrides --attribute-co-authored-by precedence.
+#AIDER_ATTRIBUTE_AUTHOR=
 
-## Attribute aider commits in the git committer name (default: True)
-#AIDER_ATTRIBUTE_COMMITTER=true
+## Attribute aider commits in the git committer name (default: True). If explicitly set to True, overrides --attribute-co-authored-by precedence for aider edits.
+#AIDER_ATTRIBUTE_COMMITTER=
 
 ## Prefix commit messages with 'aider: ' if aider authored the changes (default: False)
 #AIDER_ATTRIBUTE_COMMIT_MESSAGE_AUTHOR=false
 
 ## Prefix all commit messages with 'aider: ' (default: False)
 #AIDER_ATTRIBUTE_COMMIT_MESSAGE_COMMITTER=false
+
+## Attribute aider edits using the Co-authored-by trailer in the commit message (default: True). If True, this takes precedence over default --attribute-author and --attribute-committer behavior unless they are explicitly set to True.
+#AIDER_ATTRIBUTE_CO_AUTHORED_BY=true
+
+## Enable/disable git pre-commit hooks with --no-verify (default: False)
+#AIDER_GIT_COMMIT_VERIFY=false
 
 ## Commit all pending changes with a suitable commit message, then exit
 #AIDER_COMMIT=false
@@ -309,6 +321,12 @@ cog.outl("```")
 
 ## Permanently disable analytics
 #AIDER_ANALYTICS_DISABLE=false
+
+## Send analytics to custom PostHog instance
+#AIDER_ANALYTICS_POSTHOG_HOST=
+
+## Send analytics to custom PostHog project
+#AIDER_ANALYTICS_POSTHOG_PROJECT_API_KEY=
 
 ############
 # Upgrading:
@@ -373,6 +391,9 @@ cog.outl("```")
 #################
 # Other settings:
 
+## Never prompt for or attempt to install Playwright for web scraping (default: False).
+#AIDER_DISABLE_PLAYWRIGHT=false
+
 ## specify a file to edit (can be used multiple times)
 #AIDER_FILE=
 
@@ -384,6 +405,9 @@ cog.outl("```")
 
 ## Specify the language to use in the chat (default: None, uses system settings)
 #AIDER_CHAT_LANGUAGE=
+
+## Specify the language to use in the commit message (default: None, user language)
+#AIDER_COMMIT_LANGUAGE=
 
 ## Always say yes to every confirmation
 #AIDER_YES_ALWAYS=
@@ -423,6 +447,9 @@ cog.outl("```")
 
 ## Specify which editor to use for the /editor command
 #AIDER_EDITOR=
+
+## Print shell completion script for the specified SHELL and exit. Supported shells: bash, tcsh, zsh. Example: aider --shell-completions bash
+#AIDER_SHELL_COMPLETIONS=
 
 ############################
 # Deprecated model settings:

@@ -40,6 +40,7 @@ While it is not recommended, you can disable aider's use of git in a few ways:
   - `--no-auto-commits` will stop aider from git committing each of its changes.
   - `--no-dirty-commits` will stop aider from committing dirty files before applying its edits.
   - `--no-git` will completely stop aider from using git on your files. You should ensure you are keeping sensible backups of the files you are working with.
+  - `--git-commit-verify` will run pre-commit hooks when making git commits. By default, aider skips pre-commit hooks by using the `--no-verify` flag (`--git-commit-verify=False`).
 
 ## Commit messages
 
@@ -70,4 +71,6 @@ Additionally, you can use the following options to prefix commit messages:
 - `--attribute-commit-message-author`: Prefix commit messages with 'aider: ' if aider authored the changes.
 - `--attribute-commit-message-committer`: Prefix all commit messages with 'aider: ', regardless of whether aider authored the changes or not.
 
-Both of these options are disabled by default, but can be useful for easily identifying changes made by aider.
+Finally, you can use `--attribute-co-authored-by` to have aider append a Co-authored-by trailer to the end of the commit string. 
+This will disable appending `(aider)` to the git author and git committer unless you have explicitly enabled those settings.
+

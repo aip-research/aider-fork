@@ -14,7 +14,7 @@ aider_user_agent = f"Aider/{__version__} +{urls.website}"
 # platforms.
 
 
-def install_playwright(io):
+def check_env():
     try:
         from playwright.sync_api import sync_playwright
 
@@ -29,6 +29,16 @@ def install_playwright(io):
     except Exception:
         has_chromium = False
 
+    return has_pip, has_chromium
+
+
+def has_playwright():
+    has_pip, has_chromium = check_env()
+    return has_pip and has_chromium
+
+
+def install_playwright(io):
+    has_pip, has_chromium = check_env()
     if has_pip and has_chromium:
         return True
 
@@ -159,7 +169,8 @@ class Scraper:
                 try:
                     response = page.goto(url, wait_until="networkidle", timeout=5000)
                 except PlaywrightTimeoutError:
-                    self.print_error(f"Timeout while loading {url}")
+                    print(f"Page didn't quiesce, scraping content anyway: {url}")
+                    response = None
                 except PlaywrightError as e:
                     self.print_error(f"Error navigating to {url}: {str(e)}")
                     return None, None
@@ -261,7 +272,7 @@ def slimdown_html(soup):
 
 
 def main(url):
-    scraper = Scraper()
+    scraper = Scraper(playwright_available=has_playwright())
     content = scraper.scrape(url)
     print(content)
 

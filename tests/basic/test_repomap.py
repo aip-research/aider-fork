@@ -302,6 +302,9 @@ class TestRepoMapAllLanguages(unittest.TestCase):
     def test_language_gleam(self):
         self._test_language_repo_map("gleam", "gleam", "greet")
 
+    def test_language_haskell(self):
+        self._test_language_repo_map("haskell", "hs", "add")
+
     def test_language_java(self):
         self._test_language_repo_map("java", "java", "Greeting")
 
@@ -313,8 +316,6 @@ class TestRepoMapAllLanguages(unittest.TestCase):
 
     def test_language_lua(self):
         self._test_language_repo_map("lua", "lua", "greet")
-
-    # "ocaml": ("ml", "Greeter"), # not supported in tsl-pack (yet?)
 
     def test_language_php(self):
         self._test_language_repo_map("php", "php", "greet")
@@ -336,6 +337,9 @@ class TestRepoMapAllLanguages(unittest.TestCase):
     def test_language_tsx(self):
         self._test_language_repo_map("tsx", "tsx", "UserProps")
 
+    def test_language_zig(self):
+        self._test_language_repo_map("zig", "zig", "add")
+
     def test_language_csharp(self):
         self._test_language_repo_map("csharp", "cs", "IGreeter")
 
@@ -356,6 +360,9 @@ class TestRepoMapAllLanguages(unittest.TestCase):
 
     def test_language_chatito(self):
         self._test_language_repo_map("chatito", "chatito", "intent")
+
+    def test_language_clojure(self):
+        self._test_language_repo_map("clojure", "clj", "greet")
 
     def test_language_commonlisp(self):
         self._test_language_repo_map("commonlisp", "lisp", "greet")
@@ -381,6 +388,18 @@ class TestRepoMapAllLanguages(unittest.TestCase):
     def test_language_udev(self):
         self._test_language_repo_map("udev", "rules", "USB_DRIVER")
 
+    def test_language_scala(self):
+        self._test_language_repo_map("scala", "scala", "Greeter")
+
+    def test_language_ocaml(self):
+        self._test_language_repo_map("ocaml", "ml", "Greeter")
+
+    def test_language_ocaml_interface(self):
+        self._test_language_repo_map("ocaml_interface", "mli", "Greeter")
+
+    def test_language_matlab(self):
+        self._test_language_repo_map("matlab", "m", "Person")
+
     def _test_language_repo_map(self, lang, key, symbol):
         """Helper method to test repo map generation for a specific language."""
         # Get the fixture file path and name based on language
@@ -404,6 +423,7 @@ class TestRepoMapAllLanguages(unittest.TestCase):
             dump(lang)
             dump(result)
 
+            print(result)
             self.assertGreater(len(result.strip().splitlines()), 1)
 
             # Check if the result contains all the expected files and symbols

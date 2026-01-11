@@ -14,7 +14,7 @@ from prompt_toolkit.output import DummyOutput
 from aider.coders import Coder
 from aider.dump import dump  # noqa: F401
 from aider.io import InputOutput
-from aider.main import check_gitignore, main, setup_git
+from aider.main import check_gitignore, load_dotenv_files, main, setup_git
 from aider.utils import GitTemporaryDirectory, IgnorantTemporaryDirectory, make_repo
 
 
@@ -151,6 +151,114 @@ class TestMain(TestCase):
             check_gitignore(cwd, io)
             self.assertEqual("one\ntwo\n.aider*\n.env\n", gitignore.read_text())
             del os.environ["GIT_CONFIG_GLOBAL"]
+
+    def test_command_line_gitignore_files_flag(self):
+        with GitTemporaryDirectory() as git_dir:
+            git_dir = Path(git_dir)
+
+            # Create a .gitignore file
+            gitignore_file = git_dir / ".gitignore"
+            gitignore_file.write_text("ignored.txt\n")
+
+            # Create an ignored file
+            ignored_file = git_dir / "ignored.txt"
+            ignored_file.write_text("This file should be ignored.")
+
+            # Get the absolute path to the ignored file
+            abs_ignored_file = str(ignored_file.resolve())
+
+            # Test without the --add-gitignore-files flag (default: False)
+            coder = main(
+                ["--exit", "--yes", abs_ignored_file],
+                input=DummyInput(),
+                output=DummyOutput(),
+                return_coder=True,
+                force_git_root=git_dir,
+            )
+            # Verify the ignored file is not in the chat
+            self.assertNotIn(abs_ignored_file, coder.abs_fnames)
+
+            # Test with --add-gitignore-files set to True
+            coder = main(
+                ["--add-gitignore-files", "--exit", "--yes", abs_ignored_file],
+                input=DummyInput(),
+                output=DummyOutput(),
+                return_coder=True,
+                force_git_root=git_dir,
+            )
+            # Verify the ignored file is in the chat
+            self.assertIn(abs_ignored_file, coder.abs_fnames)
+
+            # Test with --add-gitignore-files set to False
+            coder = main(
+                ["--no-add-gitignore-files", "--exit", "--yes", abs_ignored_file],
+                input=DummyInput(),
+                output=DummyOutput(),
+                return_coder=True,
+                force_git_root=git_dir,
+            )
+            # Verify the ignored file is not in the chat
+            self.assertNotIn(abs_ignored_file, coder.abs_fnames)
+
+    def test_add_command_gitignore_files_flag(self):
+        with GitTemporaryDirectory() as git_dir:
+            git_dir = Path(git_dir)
+
+            # Create a .gitignore file
+            gitignore_file = git_dir / ".gitignore"
+            gitignore_file.write_text("ignored.txt\n")
+
+            # Create an ignored file
+            ignored_file = git_dir / "ignored.txt"
+            ignored_file.write_text("This file should be ignored.")
+
+            # Get the absolute path to the ignored file
+            abs_ignored_file = str(ignored_file.resolve())
+            rel_ignored_file = "ignored.txt"
+
+            # Test without the --add-gitignore-files flag (default: False)
+            coder = main(
+                ["--exit", "--yes"],
+                input=DummyInput(),
+                output=DummyOutput(),
+                return_coder=True,
+                force_git_root=git_dir,
+            )
+
+            with patch.object(coder.io, "confirm_ask", return_value=True):
+                coder.commands.cmd_add(rel_ignored_file)
+
+            # Verify the ignored file is not in the chat
+            self.assertNotIn(abs_ignored_file, coder.abs_fnames)
+
+            # Test with --add-gitignore-files set to True
+            coder = main(
+                ["--add-gitignore-files", "--exit", "--yes"],
+                input=DummyInput(),
+                output=DummyOutput(),
+                return_coder=True,
+                force_git_root=git_dir,
+            )
+            with patch.object(coder.io, "confirm_ask", return_value=True):
+                coder.commands.cmd_add(rel_ignored_file)
+
+            # Verify the ignored file is in the chat
+            self.assertIn(abs_ignored_file, coder.abs_fnames)
+
+            # Test with --add-gitignore-files set to False
+            coder = main(
+                ["--no-add-gitignore-files", "--exit", "--yes"],
+                input=DummyInput(),
+                output=DummyOutput(),
+                return_coder=True,
+                force_git_root=git_dir,
+            )
+
+            with patch.object(coder.io, "confirm_ask", return_value=True):
+                coder.commands.cmd_add(rel_ignored_file)
+
+            # Verify the ignored file is not in the chat
+            self.assertNotIn(abs_ignored_file, coder.abs_fnames)
 
     def test_main_args(self):
         with patch("aider.coders.Coder.create") as MockCoder:
@@ -684,6 +792,94 @@ class TestMain(TestCase):
             )
             self.assertTrue(coder.detect_urls)
 
+    def test_accepts_settings_warnings(self):
+        # Test that appropriate warnings are shown based on accepts_settings configuration
+        with GitTemporaryDirectory():
+            # Test model that accepts the thinking_tokens setting
+            with (
+                patch("aider.io.InputOutput.tool_warning") as mock_warning,
+                patch("aider.models.Model.set_thinking_tokens") as mock_set_thinking,
+            ):
+                main(
+                    [
+                        "--model",
+                        "anthropic/claude-3-7-sonnet-20250219",
+                        "--thinking-tokens",
+                        "1000",
+                        "--yes",
+                        "--exit",
+                    ],
+                    input=DummyInput(),
+                    output=DummyOutput(),
+                )
+                # No warning should be shown as this model accepts thinking_tokens
+                for call in mock_warning.call_args_list:
+                    self.assertNotIn("thinking_tokens", call[0][0])
+                # Method should be called
+                mock_set_thinking.assert_called_once_with("1000")
+
+            # Test model that doesn't have accepts_settings for thinking_tokens
+            with (
+                patch("aider.io.InputOutput.tool_warning") as mock_warning,
+                patch("aider.models.Model.set_thinking_tokens") as mock_set_thinking,
+            ):
+                main(
+                    [
+                        "--model",
+                        "gpt-4o",
+                        "--thinking-tokens",
+                        "1000",
+                        "--check-model-accepts-settings",
+                        "--yes",
+                        "--exit",
+                    ],
+                    input=DummyInput(),
+                    output=DummyOutput(),
+                )
+                # Warning should be shown
+                warning_shown = False
+                for call in mock_warning.call_args_list:
+                    if "thinking_tokens" in call[0][0]:
+                        warning_shown = True
+                self.assertTrue(warning_shown)
+                # Method should NOT be called because model doesn't support it and check flag is on
+                mock_set_thinking.assert_not_called()
+
+            # Test model that accepts the reasoning_effort setting
+            with (
+                patch("aider.io.InputOutput.tool_warning") as mock_warning,
+                patch("aider.models.Model.set_reasoning_effort") as mock_set_reasoning,
+            ):
+                main(
+                    ["--model", "o1", "--reasoning-effort", "3", "--yes", "--exit"],
+                    input=DummyInput(),
+                    output=DummyOutput(),
+                )
+                # No warning should be shown as this model accepts reasoning_effort
+                for call in mock_warning.call_args_list:
+                    self.assertNotIn("reasoning_effort", call[0][0])
+                # Method should be called
+                mock_set_reasoning.assert_called_once_with("3")
+
+            # Test model that doesn't have accepts_settings for reasoning_effort
+            with (
+                patch("aider.io.InputOutput.tool_warning") as mock_warning,
+                patch("aider.models.Model.set_reasoning_effort") as mock_set_reasoning,
+            ):
+                main(
+                    ["--model", "gpt-3.5-turbo", "--reasoning-effort", "3", "--yes", "--exit"],
+                    input=DummyInput(),
+                    output=DummyOutput(),
+                )
+                # Warning should be shown
+                warning_shown = False
+                for call in mock_warning.call_args_list:
+                    if "reasoning_effort" in call[0][0]:
+                        warning_shown = True
+                self.assertTrue(warning_shown)
+                # Method should still be called by default
+                mock_set_reasoning.assert_not_called()
+
     @patch("aider.models.ModelInfoManager.set_verify_ssl")
     def test_no_verify_ssl_sets_model_info_manager(self, mock_set_verify_ssl):
         with GitTemporaryDirectory():
@@ -840,18 +1036,40 @@ class TestMain(TestCase):
             self.assertEqual(repo.git.config("user.name"), "Directive User")
             self.assertEqual(repo.git.config("user.email"), "directive@example.com")
 
+    def test_resolve_aiderignore_path(self):
+        # Import the function directly to test it
+        from aider.args import resolve_aiderignore_path
+
+        # Test with absolute path
+        abs_path = os.path.abspath("/tmp/test/.aiderignore")
+        self.assertEqual(resolve_aiderignore_path(abs_path), abs_path)
+
+        # Test with relative path and git root
+        git_root = "/path/to/git/root"
+        rel_path = ".aiderignore"
+        self.assertEqual(
+            resolve_aiderignore_path(rel_path, git_root), str(Path(git_root) / rel_path)
+        )
+
+        # Test with relative path and no git root
+        rel_path = ".aiderignore"
+        self.assertEqual(resolve_aiderignore_path(rel_path), rel_path)
+
     def test_invalid_edit_format(self):
         with GitTemporaryDirectory():
-            with patch("aider.io.InputOutput.offer_url") as mock_offer_url:
-                result = main(
-                    ["--edit-format", "not-a-real-format", "--exit", "--yes"],
-                    input=DummyInput(),
-                    output=DummyOutput(),
-                )
-                self.assertEqual(result, 1)  # main() should return 1 on error
-                mock_offer_url.assert_called_once()
-                args, _ = mock_offer_url.call_args
-                self.assertEqual(args[0], "https://aider.chat/docs/more/edit-formats.html")
+            # Suppress stderr for this test as argparse prints an error message
+            with patch("sys.stderr", new_callable=StringIO) as mock_stderr:
+                with self.assertRaises(SystemExit) as cm:
+                    _ = main(
+                        ["--edit-format", "not-a-real-format", "--exit", "--yes"],
+                        input=DummyInput(),
+                        output=DummyOutput(),
+                    )
+                # argparse.ArgumentParser.exit() is called with status 2 for invalid choice
+                self.assertEqual(cm.exception.code, 2)
+                stderr_output = mock_stderr.getvalue()
+                self.assertIn("invalid choice", stderr_output)
+                self.assertIn("not-a-real-format", stderr_output)
 
     def test_default_model_selection(self):
         with GitTemporaryDirectory():
@@ -876,7 +1094,7 @@ class TestMain(TestCase):
             coder = main(
                 ["--exit", "--yes"], input=DummyInput(), output=DummyOutput(), return_coder=True
             )
-            self.assertIn("openrouter/anthropic/claude", coder.main_model.name.lower())
+            self.assertIn("openrouter/", coder.main_model.name.lower())
             del os.environ["OPENROUTER_API_KEY"]
 
             # Test OpenAI API key
@@ -892,12 +1110,15 @@ class TestMain(TestCase):
             coder = main(
                 ["--exit", "--yes"], input=DummyInput(), output=DummyOutput(), return_coder=True
             )
-            self.assertIn("flash", coder.main_model.name.lower())
+            self.assertIn("gemini", coder.main_model.name.lower())
             del os.environ["GEMINI_API_KEY"]
 
-            # Test no API keys
-            result = main(["--exit", "--yes"], input=DummyInput(), output=DummyOutput())
-            self.assertEqual(result, 1)
+            # Test no API keys - should offer OpenRouter OAuth
+            with patch("aider.onboarding.offer_openrouter_oauth") as mock_offer_oauth:
+                mock_offer_oauth.return_value = None  # Simulate user declining or failure
+                result = main(["--exit", "--yes"], input=DummyInput(), output=DummyOutput())
+                self.assertEqual(result, 1)  # Expect failure since no model could be selected
+                mock_offer_oauth.assert_called_once()
 
     def test_model_precedence(self):
         with GitTemporaryDirectory():
@@ -922,6 +1143,16 @@ class TestMain(TestCase):
             system_info = coder.get_platform_info()
             self.assertIn("Spanish", system_info)
 
+    def test_commit_language_japanese(self):
+        with GitTemporaryDirectory():
+            coder = main(
+                ["--commit-language", "japanese", "--exit", "--yes"],
+                input=DummyInput(),
+                output=DummyOutput(),
+                return_coder=True,
+            )
+            self.assertIn("japanese", coder.commit_language)
+
     @patch("git.Repo.init")
     def test_main_exit_with_git_command_not_found(self, mock_git_init):
         mock_git_init.side_effect = git.exc.GitCommandNotFound("git", "Command 'git' not found")
@@ -935,7 +1166,7 @@ class TestMain(TestCase):
 
     def test_reasoning_effort_option(self):
         coder = main(
-            ["--reasoning-effort", "3", "--yes", "--exit"],
+            ["--reasoning-effort", "3", "--no-check-model-accepts-settings", "--yes", "--exit"],
             input=DummyInput(),
             output=DummyOutput(),
             return_coder=True,
@@ -943,3 +1174,310 @@ class TestMain(TestCase):
         self.assertEqual(
             coder.main_model.extra_params.get("extra_body", {}).get("reasoning_effort"), "3"
         )
+
+    def test_thinking_tokens_option(self):
+        coder = main(
+            ["--model", "sonnet", "--thinking-tokens", "1000", "--yes", "--exit"],
+            input=DummyInput(),
+            output=DummyOutput(),
+            return_coder=True,
+        )
+        self.assertEqual(
+            coder.main_model.extra_params.get("thinking", {}).get("budget_tokens"), 1000
+        )
+
+    def test_list_models_includes_metadata_models(self):
+        # Test that models from model-metadata.json appear in list-models output
+        with GitTemporaryDirectory():
+            # Create a temporary model-metadata.json with test models
+            metadata_file = Path(".aider.model.metadata.json")
+            test_models = {
+                "unique-model-name": {
+                    "max_input_tokens": 8192,
+                    "litellm_provider": "test-provider",
+                    "mode": "chat",  # Added mode attribute
+                },
+                "another-provider/another-unique-model": {
+                    "max_input_tokens": 4096,
+                    "litellm_provider": "another-provider",
+                    "mode": "chat",  # Added mode attribute
+                },
+            }
+            metadata_file.write_text(json.dumps(test_models))
+
+            # Capture stdout to check the output
+            with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
+                main(
+                    [
+                        "--list-models",
+                        "unique-model",
+                        "--model-metadata-file",
+                        str(metadata_file),
+                        "--yes",
+                        "--no-gitignore",
+                    ],
+                    input=DummyInput(),
+                    output=DummyOutput(),
+                )
+                output = mock_stdout.getvalue()
+
+                # Check that the unique model name from our metadata file is listed
+                self.assertIn("test-provider/unique-model-name", output)
+
+    def test_list_models_includes_all_model_sources(self):
+        # Test that models from both litellm.model_cost and model-metadata.json
+        # appear in list-models
+        with GitTemporaryDirectory():
+            # Create a temporary model-metadata.json with test models
+            metadata_file = Path(".aider.model.metadata.json")
+            test_models = {
+                "metadata-only-model": {
+                    "max_input_tokens": 8192,
+                    "litellm_provider": "test-provider",
+                    "mode": "chat",  # Added mode attribute
+                }
+            }
+            metadata_file.write_text(json.dumps(test_models))
+
+            # Capture stdout to check the output
+            with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
+                main(
+                    [
+                        "--list-models",
+                        "metadata-only-model",
+                        "--model-metadata-file",
+                        str(metadata_file),
+                        "--yes",
+                        "--no-gitignore",
+                    ],
+                    input=DummyInput(),
+                    output=DummyOutput(),
+                )
+                output = mock_stdout.getvalue()
+
+                dump(output)
+
+                # Check that both models appear in the output
+                self.assertIn("test-provider/metadata-only-model", output)
+
+    def test_check_model_accepts_settings_flag(self):
+        # Test that --check-model-accepts-settings affects whether settings are applied
+        with GitTemporaryDirectory():
+            # When flag is on, setting shouldn't be applied to non-supporting model
+            with patch("aider.models.Model.set_thinking_tokens") as mock_set_thinking:
+                main(
+                    [
+                        "--model",
+                        "gpt-4o",
+                        "--thinking-tokens",
+                        "1000",
+                        "--check-model-accepts-settings",
+                        "--yes",
+                        "--exit",
+                    ],
+                    input=DummyInput(),
+                    output=DummyOutput(),
+                )
+                # Method should not be called because model doesn't support it and flag is on
+                mock_set_thinking.assert_not_called()
+
+    def test_list_models_with_direct_resource_patch(self):
+        # Test that models from resources/model-metadata.json are included in list-models output
+        with GitTemporaryDirectory():
+            # Create a temporary file with test model metadata
+            test_file = Path(self.tempdir) / "test-model-metadata.json"
+            test_resource_models = {
+                "special-model": {
+                    "max_input_tokens": 8192,
+                    "litellm_provider": "resource-provider",
+                    "mode": "chat",
+                }
+            }
+            test_file.write_text(json.dumps(test_resource_models))
+
+            # Create a mock for the resource file path
+            mock_resource_path = MagicMock()
+            mock_resource_path.__str__.return_value = str(test_file)
+
+            # Create a mock for the files function that returns an object with joinpath
+            mock_files = MagicMock()
+            mock_files.joinpath.return_value = mock_resource_path
+
+            with patch("aider.main.importlib_resources.files", return_value=mock_files):
+                # Capture stdout to check the output
+                with patch("sys.stdout", new_callable=StringIO) as mock_stdout:
+                    main(
+                        ["--list-models", "special", "--yes", "--no-gitignore"],
+                        input=DummyInput(),
+                        output=DummyOutput(),
+                    )
+                    output = mock_stdout.getvalue()
+
+                    # Check that the resource model appears in the output
+                    self.assertIn("resource-provider/special-model", output)
+
+            # When flag is off, setting should be applied regardless of support
+            with patch("aider.models.Model.set_reasoning_effort") as mock_set_reasoning:
+                main(
+                    [
+                        "--model",
+                        "gpt-3.5-turbo",
+                        "--reasoning-effort",
+                        "3",
+                        "--no-check-model-accepts-settings",
+                        "--yes",
+                        "--exit",
+                    ],
+                    input=DummyInput(),
+                    output=DummyOutput(),
+                )
+                # Method should be called because flag is off
+                mock_set_reasoning.assert_called_once_with("3")
+
+    def test_model_accepts_settings_attribute(self):
+        with GitTemporaryDirectory():
+            # Test with a model where we override the accepts_settings attribute
+            with patch("aider.models.Model") as MockModel:
+                # Setup mock model instance to simulate accepts_settings attribute
+                mock_instance = MockModel.return_value
+                mock_instance.name = "test-model"
+                mock_instance.accepts_settings = ["reasoning_effort"]
+                mock_instance.validate_environment.return_value = {
+                    "missing_keys": [],
+                    "keys_in_environment": [],
+                }
+                mock_instance.info = {}
+                mock_instance.weak_model_name = None
+                mock_instance.get_weak_model.return_value = None
+
+                # Run with both settings, but model only accepts reasoning_effort
+                main(
+                    [
+                        "--model",
+                        "test-model",
+                        "--reasoning-effort",
+                        "3",
+                        "--thinking-tokens",
+                        "1000",
+                        "--check-model-accepts-settings",
+                        "--yes",
+                        "--exit",
+                    ],
+                    input=DummyInput(),
+                    output=DummyOutput(),
+                )
+
+                # Only set_reasoning_effort should be called, not set_thinking_tokens
+                mock_instance.set_reasoning_effort.assert_called_once_with("3")
+                mock_instance.set_thinking_tokens.assert_not_called()
+
+    @patch("aider.main.InputOutput")
+    def test_stream_and_cache_warning(self, MockInputOutput):
+        mock_io_instance = MockInputOutput.return_value
+        with GitTemporaryDirectory():
+            main(
+                ["--stream", "--cache-prompts", "--exit", "--yes"],
+                input=DummyInput(),
+                output=DummyOutput(),
+            )
+        mock_io_instance.tool_warning.assert_called_with(
+            "Cost estimates may be inaccurate when using streaming and caching."
+        )
+
+    @patch("aider.main.InputOutput")
+    def test_stream_without_cache_no_warning(self, MockInputOutput):
+        mock_io_instance = MockInputOutput.return_value
+        with GitTemporaryDirectory():
+            main(
+                ["--stream", "--exit", "--yes"],
+                input=DummyInput(),
+                output=DummyOutput(),
+            )
+        for call in mock_io_instance.tool_warning.call_args_list:
+            self.assertNotIn("Cost estimates may be inaccurate", call[0][0])
+
+    def test_argv_file_respects_git(self):
+        with GitTemporaryDirectory():
+            fname = Path("not_in_git.txt")
+            fname.touch()
+            with open(".gitignore", "w+") as f:
+                f.write("not_in_git.txt")
+            coder = main(
+                argv=["--file", "not_in_git.txt"],
+                input=DummyInput(),
+                output=DummyOutput(),
+                return_coder=True,
+            )
+            self.assertNotIn("not_in_git.txt", str(coder.abs_fnames))
+            self.assertFalse(coder.allowed_to_edit("not_in_git.txt"))
+
+    def test_load_dotenv_files_override(self):
+        with GitTemporaryDirectory() as git_dir:
+            git_dir = Path(git_dir)
+
+            # Create fake home and .aider directory
+            fake_home = git_dir / "fake_home"
+            fake_home.mkdir()
+            aider_dir = fake_home / ".aider"
+            aider_dir.mkdir()
+
+            # Create oauth keys file
+            oauth_keys_file = aider_dir / "oauth-keys.env"
+            oauth_keys_file.write_text("OAUTH_VAR=oauth_val\nSHARED_VAR=oauth_shared\n")
+
+            # Create git root .env file
+            git_root_env = git_dir / ".env"
+            git_root_env.write_text("GIT_VAR=git_val\nSHARED_VAR=git_shared\n")
+
+            # Create CWD .env file in a subdir
+            cwd_subdir = git_dir / "subdir"
+            cwd_subdir.mkdir()
+            cwd_env = cwd_subdir / ".env"
+            cwd_env.write_text("CWD_VAR=cwd_val\nSHARED_VAR=cwd_shared\n")
+
+            # Change to subdir
+            original_cwd = os.getcwd()
+            os.chdir(cwd_subdir)
+
+            # Clear relevant env vars before test
+            for var in ["OAUTH_VAR", "SHARED_VAR", "GIT_VAR", "CWD_VAR"]:
+                if var in os.environ:
+                    del os.environ[var]
+
+            with patch("pathlib.Path.home", return_value=fake_home):
+                loaded_files = load_dotenv_files(str(git_dir), None)
+
+                # Assert files were loaded in expected order (oauth first)
+                self.assertIn(str(oauth_keys_file.resolve()), loaded_files)
+                self.assertIn(str(git_root_env.resolve()), loaded_files)
+                self.assertIn(str(cwd_env.resolve()), loaded_files)
+                self.assertLess(
+                    loaded_files.index(str(oauth_keys_file.resolve())),
+                    loaded_files.index(str(git_root_env.resolve())),
+                )
+                self.assertLess(
+                    loaded_files.index(str(git_root_env.resolve())),
+                    loaded_files.index(str(cwd_env.resolve())),
+                )
+
+                # Assert environment variables reflect the override order
+                self.assertEqual(os.environ.get("OAUTH_VAR"), "oauth_val")
+                self.assertEqual(os.environ.get("GIT_VAR"), "git_val")
+                self.assertEqual(os.environ.get("CWD_VAR"), "cwd_val")
+                # SHARED_VAR should be overridden by the last loaded file (cwd .env)
+                self.assertEqual(os.environ.get("SHARED_VAR"), "cwd_shared")
+
+            # Restore CWD
+            os.chdir(original_cwd)
+
+    @patch("aider.main.InputOutput")
+    def test_cache_without_stream_no_warning(self, MockInputOutput):
+        mock_io_instance = MockInputOutput.return_value
+        with GitTemporaryDirectory():
+            main(
+                ["--cache-prompts", "--exit", "--yes", "--no-stream"],
+                input=DummyInput(),
+                output=DummyOutput(),
+            )
+        for call in mock_io_instance.tool_warning.call_args_list:
+            self.assertNotIn("Cost estimates may be inaccurate", call[0][0])
